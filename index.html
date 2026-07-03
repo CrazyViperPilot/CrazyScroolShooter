@@ -17,7 +17,7 @@
             justify-content: center;
             height: 100vh;
             overflow: hidden;
-            touch-action: none; /* Wichtig für flüssige Touch-Steuerung */
+            touch-action: none; 
         }
         #gameContainer {
             position: relative;
@@ -32,6 +32,8 @@
             width: 100%;
             height: 100%;
             background: linear-gradient(to bottom, #00001a, #000033);
+            touch-action: none; /* Zwingend nötig für reibungsloses Wischen auf iOS/Android */
+            cursor: crosshair;
         }
         #ui {
             position: absolute;
@@ -73,6 +75,7 @@
             border-radius: 10px;
             display: none;
             width: 80%;
+            box-sizing: border-box;
         }
         button {
             margin-top: 15px;
@@ -112,7 +115,7 @@
         <div id="gameOver">
             <h2>MISSION FAILED</h2>
             <p>Score: <span id="finalScore">0</span></p>
-            <button onclick="resetGame()">Neustart</button>
+            <button id="restartBtn">Neustart</button>
         </div>
     </div>
 
@@ -120,15 +123,14 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
-    // UI Elemente
     const scoreText = document.getElementById('scoreText');
     const weaponText = document.getElementById('weaponText');
     const hpBar = document.getElementById('hpBar');
     const shieldBar = document.getElementById('shieldBar');
     const gameOverScreen = document.getElementById('gameOver');
     const finalScoreText = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restartBtn');
 
-    // Spiel-Status
     let isGameOver = false;
     let score = 0;
     let frameCount = 0;
@@ -137,4 +139,528 @@
     let enemies = [];
     let perks = [];
 
-    // --- TOUCH & MA
+    // --- VERBESSERTE STEUERUNG ---
+    let targetX = canvas.width / 2;
+
+    function updatePosition(e) {
+        if (isGameOver) return;
+        
+        // Verhindert Scrollen auf Mobilgeräten
+        if (e.type === 'touchmove' || e.type === 'touchstart') {
+            e.preventDefault(); 
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width; 
+        
+        let clientX;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX; // Touch
+        } else {
+            clientX = e.clientX; // Maus
+        }
+        
+        targetX = (clientX - rect.left) * scaleX;
+    }
+
+    // Touch-Events
+    canvas.addEventListener('touchstart', updatePosition, { passive: false });
+    canvas.addEventListener('touchmove', updatePosition, { passive: false });
+    
+    // Maus-Events (folgt nun automatisch ohne Klicken)
+    canvas.addEventListener('mousemove', updatePosition);
+
+    // Tastatur-Events (mit Groß-/Kleinschreibung für CapsLock)
+    const keys = { ArrowLeft: false, ArrowRight: false, a: false, d: false, A: false, D: false };
+    window.addEventListener('keydown', (e) => { 
+        if (keys.hasOwnProperty(e.key)) {
+            keys[e.key] = true; 
+        }
+    });
+    window.addEventListener('keyup', (e) => { 
+        if (keys.hasOwnProperty(e.key)) {
+            keys[e.key] = false; 
+        }
+    });
+
+    // Button-Klick für Neustart (sicherer als Inline onclick)
+    restartBtn.addEventListener('click', () => resetGame());
+    restartBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        resetGame();
+    });
+
+    // --- KLASSEN ---
+
+    class Entity {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.hp = 100;
+            this.maxHp = 100;
+            this.shield = 50;
+            this.maxShield = 50;
+            this.markedForDeletion = false;
+        }
+
+        takeDamage(amount) {
+            if (this.shield > 0) {
+                this.shield -= amount;
+                if (this.shield < 0) {
+                    this.hp += this.shield;
+                    this.shield = 0;
+                }
+            } else {
+                this.hp -= amount;
+            }
+
+            if (this.hp <= 0) {
+                this.markedForDeletion = true;
+                createParticles(this.x, this.y, '#ff8800', 30);
+            }
+        }
+
+        drawShield(radius) {
+            if (this.shield > 0) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+                const opacity = Math.max(0.2, this.shield / this.maxShield);
+                ctx.strokeStyle = `rgba(51, 170, 255, ${opacity})`;
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#33aaff';
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+        }
+    }
+
+    class Wingman extends Entity {
+        constructor(offsetX, offsetY) {
+            super(0, 0);
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.width = 20;
+            this.height = 30;
+            this.maxHp = 50;
+            this.hp = 50;
+            this.maxShield = 30;
+            this.shield = 30;
+        }
+
+        updatePos(playerX, playerY) {
+            this.x += ((playerX + this.offsetX) - this.x) * 0.2;
+            this.y = playerY + this.offsetY;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.beginPath();
+            ctx.moveTo(0, -this.height / 2);
+            ctx.lineTo(this.width / 2, this.height / 2);
+            ctx.lineTo(0, this.height / 4);
+            ctx.lineTo(-this.width / 2, this.height / 2);
+            ctx.closePath();
+            ctx.fillStyle = '#00ffaa';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#00ffaa';
+            ctx.fill();
+            ctx.restore();
+
+            this.drawShield(22);
+            
+            ctx.fillStyle = '#ff3333';
+            ctx.fillRect(this.x - 15, this.y + 20, 30, 4);
+            ctx.fillStyle = '#33ff33';
+            ctx.fillRect(this.x - 15, this.y + 20, 30 * (Math.max(0, this.hp) / this.maxHp), 4);
+        }
+    }
+
+    class Player extends Entity {
+        constructor() {
+            super(canvas.width / 2, canvas.height - 100);
+            this.width = 36;
+            this.height = 48;
+            this.speed = 8;
+            this.weaponLevel = 1;
+            this.shootCooldown = 0;
+            
+            this.maxHp = 100;
+            this.hp = 100;
+            this.maxShield = 100;
+            this.shield = 100;
+
+            this.wingmenSlots = [
+                { offset: -55, y: 15, active: null },
+                { offset: 55, y: 15, active: null },
+                { offset: -95, y: 35, active: null },
+                { offset: 95, y: 35, active: null }
+            ];
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.beginPath();
+            ctx.moveTo(0, -this.height / 2);
+            ctx.lineTo(this.width / 2, this.height / 2);
+            ctx.lineTo(0, this.height / 4);
+            ctx.lineTo(-this.width / 2, this.height / 2);
+            ctx.closePath();
+            ctx.fillStyle = '#00ffff';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00ffff';
+            ctx.fill();
+            ctx.restore();
+
+            this.drawShield(35);
+
+            this.wingmenSlots.forEach(slot => {
+                if (slot.active) slot.active.draw();
+            });
+        }
+
+        update() {
+            // Tastatur-Steuerung überschreibt TargetX
+            if (keys.ArrowLeft || keys.a || keys.A) targetX -= this.speed;
+            if (keys.ArrowRight || keys.d || keys.D) targetX += this.speed;
+
+            // Begrenzung für TargetX, damit die Tastatur das Schiff nicht aus dem Bild schiebt
+            if (targetX < 20) targetX = 20;
+            if (targetX > canvas.width - 20) targetX = canvas.width - 20;
+
+            // Smoothes Bewegen zur Zielposition
+            this.x += (targetX - this.x) * 0.3;
+
+            // Schießen
+            if (this.shootCooldown > 0) {
+                this.shootCooldown--;
+            } else {
+                this.shoot();
+                this.shootCooldown = Math.max(8, 20 - (this.weaponLevel * 2)); 
+            }
+
+            hpBar.style.width = `${Math.max(0, (this.hp / this.maxHp) * 100)}%`;
+            shieldBar.style.width = `${Math.max(0, (this.shield / this.maxShield) * 100)}%`;
+            weaponText.innerText = this.weaponLevel;
+
+            this.wingmenSlots.forEach(slot => {
+                if (slot.active) {
+                    slot.active.updatePos(this.x, this.y);
+                    if (slot.active.markedForDeletion) {
+                        slot.active = null; 
+                    }
+                }
+            });
+
+            if (this.hp <= 0) isGameOver = true;
+        }
+
+        shoot() {
+            const fireConfig = (offsetX, velocityY, velocityX = 0) => {
+                projectiles.push(new Projectile(this.x + offsetX, this.y - this.height/2, velocityX, velocityY, '#00ffff'));
+            };
+
+            if (this.weaponLevel === 1) {
+                fireConfig(0, -12);
+            } else if (this.weaponLevel === 2) {
+                fireConfig(-8, -12); fireConfig(8, -12);
+            } else if (this.weaponLevel === 3) {
+                fireConfig(0, -12); fireConfig(-15, -11, -2); fireConfig(15, -11, 2);
+            } else {
+                fireConfig(-12, -12); fireConfig(12, -12); 
+                fireConfig(-20, -10, -3); fireConfig(20, -10, 3);
+                fireConfig(0, -13);
+            }
+            
+            this.wingmenSlots.forEach(slot => {
+                if (slot.active) {
+                    projectiles.push(new Projectile(slot.active.x, slot.active.y - 15, 0, -10, '#00ffaa'));
+                }
+            });
+        }
+
+        addWingman() {
+            let emptySlot = this.wingmenSlots.find(s => s.active === null);
+            if (emptySlot) {
+                emptySlot.active = new Wingman(emptySlot.offset, emptySlot.y);
+                emptySlot.active.x = this.x + emptySlot.offset;
+                emptySlot.active.y = this.y + emptySlot.y;
+            } else {
+                score += 150; 
+            }
+        }
+    }
+
+    class Projectile {
+        constructor(x, y, vx, vy, color) {
+            this.x = x; this.y = y;
+            this.vx = vx; this.vy = vy;
+            this.color = color;
+            this.radius = 4;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = this.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            if (this.y < -50 || this.x < -50 || this.x > canvas.width + 50) this.markedForDeletion = true;
+        }
+    }
+
+    class Enemy extends Entity {
+        constructor() {
+            super(Math.random() * (canvas.width - 40) + 20, -50);
+            this.width = 35;
+            this.height = 35;
+            this.velocity = 2 + Math.random() * 3 + (score * 0.002);
+            
+            let hpScale = 20 + Math.floor(score / 50) * 10;
+            this.hp = hpScale;
+            this.maxHp = hpScale;
+            this.shield = 0; 
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.beginPath();
+            ctx.moveTo(0, this.height/2);
+            ctx.lineTo(this.width/2, -this.height/2);
+            ctx.lineTo(-this.width/2, -this.height/2);
+            ctx.closePath();
+            ctx.fillStyle = '#ff3333';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff3333';
+            ctx.fill();
+            ctx.restore();
+        }
+        update() {
+            this.y += this.velocity;
+            if (this.y > canvas.height + 50) this.markedForDeletion = true;
+        }
+    }
+
+    class Perk {
+        constructor() {
+            this.radius = 18;
+            this.x = Math.random() * (canvas.width - this.radius*2) + this.radius;
+            this.y = -50;
+            this.velocity = 2.5;
+            this.markedForDeletion = false;
+            
+            const types = [
+                { id: 'wingman', color: '#33ff33', symbol: '+' },
+                { id: 'weapon', color: '#ff3333', symbol: 'W' },
+                { id: 'shield', color: '#33aaff', symbol: 'S' },
+                { id: 'health', color: '#ff33ff', symbol: 'H' }
+            ];
+            this.typeInfo = types[Math.floor(Math.random() * types.length)];
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            
+            let scale = 1 + Math.sin(frameCount * 0.1) * 0.1;
+            ctx.scale(scale, scale);
+
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.strokeStyle = this.typeInfo.color;
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.typeInfo.color;
+            ctx.stroke();
+            
+            ctx.fillStyle = this.typeInfo.color;
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.typeInfo.symbol, 0, 1);
+            
+            ctx.restore();
+        }
+        update() {
+            this.y += this.velocity;
+            if (this.y > canvas.height + 50) this.markedForDeletion = true;
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color, speedMultiplier = 1) {
+            this.x = x; this.y = y;
+            this.velocity = { 
+                x: (Math.random() - 0.5) * 10 * speedMultiplier, 
+                y: (Math.random() - 0.5) * 10 * speedMultiplier 
+            };
+            this.color = color;
+            this.life = 1.0;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.life;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.restore();
+        }
+        update() {
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+            this.life -= 0.03;
+            if (this.life <= 0) this.markedForDeletion = true;
+        }
+    }
+
+    let player;
+
+    function createParticles(x, y, color, amount = 15, speed = 1) {
+        for (let i = 0; i < amount; i++) {
+            particles.push(new Particle(x, y, color, speed));
+        }
+    }
+
+    function checkCollision(obj1, obj2, threshold) {
+        const dx = obj1.x - obj2.x;
+        const dy = obj1.y - obj2.y;
+        return Math.sqrt(dx * dx + dy * dy) < threshold;
+    }
+
+    function spawnEntities() {
+        let spawnRate = Math.max(20, 70 - Math.floor(score / 100));
+        if (frameCount % spawnRate === 0) enemies.push(new Enemy());
+        if (frameCount % 300 === 0 && Math.random() > 0.2) perks.push(new Perk());
+    }
+
+    function init() {
+        player = new Player();
+        targetX = canvas.width / 2;
+        projectiles = []; enemies = []; perks = []; particles = [];
+        score = 0; frameCount = 0; isGameOver = false;
+        
+        scoreText.innerText = score;
+        gameOverScreen.style.display = 'none';
+        animate();
+    }
+
+    function animate() {
+        if (isGameOver) {
+            finalScoreText.innerText = score;
+            gameOverScreen.style.display = 'block';
+            return;
+        }
+
+        ctx.fillStyle = 'rgba(0, 0, 20, 0.4)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if(frameCount % 2 === 0) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillRect(Math.random() * canvas.width, 0, 1, Math.random() * 5 + 2);
+        }
+
+        player.update();
+        player.draw();
+
+        spawnEntities();
+
+        [...projectiles, ...enemies, ...perks, ...particles].forEach(entity => {
+            entity.update();
+            entity.draw();
+        });
+
+        projectiles.forEach(p => {
+            if (p.markedForDeletion) return;
+            enemies.forEach(e => {
+                if (!e.markedForDeletion && checkCollision(p, e, 25)) {
+                    p.markedForDeletion = true;
+                    e.takeDamage(10 + (player.weaponLevel * 2)); 
+                    
+                    if (e.markedForDeletion) {
+                        score += 20;
+                        scoreText.innerText = score;
+                    } else {
+                        createParticles(p.x, p.y, '#ffffff', 3, 0.5);
+                    }
+                }
+            });
+        });
+
+        enemies.forEach(e => {
+            if (e.markedForDeletion) return;
+
+            let hitSomething = false;
+
+            player.wingmenSlots.forEach(slot => {
+                if (!hitSomething && slot.active && !slot.active.markedForDeletion && checkCollision(e, slot.active, 30)) {
+                    slot.active.takeDamage(40);
+                    hitSomething = true;
+                }
+            });
+
+            if (!hitSomething && checkCollision(e, player, 35)) {
+                player.takeDamage(30);
+                hitSomething = true;
+            }
+
+            if (hitSomething) {
+                e.takeDamage(100); 
+            }
+        });
+
+        perks.forEach(p => {
+            if (!p.markedForDeletion && checkCollision(player, p, 40)) {
+                p.markedForDeletion = true;
+                createParticles(p.x, p.y, p.typeInfo.color, 20);
+                score += 50;
+                scoreText.innerText = score;
+
+                switch(p.typeInfo.id) {
+                    case 'wingman':
+                        player.addWingman();
+                        break;
+                    case 'weapon':
+                        if(player.weaponLevel < 5) player.weaponLevel++;
+                        else score += 100;
+                        break;
+                    case 'shield':
+                        player.maxShield += 20;
+                        player.shield = player.maxShield;
+                        player.wingmenSlots.forEach(s => { if(s.active) { s.active.maxShield += 10; s.active.shield = s.active.maxShield; }});
+                        break;
+                    case 'health':
+                        player.maxHp += 20;
+                        player.hp = Math.min(player.hp + 50, player.maxHp);
+                        player.wingmenSlots.forEach(s => { if(s.active) { s.active.maxHp += 10; s.active.hp = s.active.maxHp; }});
+                        break;
+                }
+            }
+        });
+
+        projectiles = projectiles.filter(p => !p.markedForDeletion);
+        enemies = enemies.filter(e => !e.markedForDeletion);
+        perks = perks.filter(p => !p.markedForDeletion);
+        particles = particles.filter(p => !p.markedForDeletion);
+
+        frameCount++;
+        requestAnimationFrame(animate);
+    }
+
+    function resetGame() {
+        init();
+    }
+
+    init();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Squadron - Scroll Shooter</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0a0a;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #000011, #000033);
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 30px;
+            border: 2px solid cyan;
+            border-radius: 10px;
+            display: none;
+        }
+        button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: transparent;
+            color: cyan;
+            border: 2px solid cyan;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: cyan;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="450" height="700"></canvas>
+        <div id="ui">Score: <span id="scoreText">0</span></div>
+        <div id="gameOver">
+            <h2>GAME OVER</h2>
+            <p>Dein Score: <span id="finalScore">0</span></p>
+            <button onclick="resetGame()">Neustart</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreText = document.getElementById('scoreText');
+    const gameOverScreen = document.getElementById('gameOver');
+    const finalScoreText = document.getElementById('finalScore');
+
+    // Spiel-Status
+    let isGameOver = false;
+    let score = 0;
+    let frameCount = 0;
+    let particles = [];
+
+    // Tastensteuerung
+    const keys = {
+        ArrowLeft: false,
+        ArrowRight: false,
+        a: false,
+        d: false
+    };
+
+    window.addEventListener('keydown', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+    window.addEventListener('keyup', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+
+    // --- KLASSEN ---
+
+    class Player {
+        constructor() {
+            this.width = 30;
+            this.height = 40;
+            this.x = canvas.width / 2;
+            this.y = canvas.height - 60;
+            this.speed = 5;
+            this.wingmenCount = 0; // Max 4
+            this.wingmenOffsets = [-40, 40, -80, 80]; 
+            this.shootCooldown = 0;
+        }
+
+        draw() {
+            // Hauptschiff zeichnen (Vektor)
+            this.drawShip(this.x, this.y, '#00ffff', 1);
+
+            // Wingmen zeichnen
+            for (let i = 0; i < this.wingmenCount; i++) {
+                let offset = this.wingmenOffsets[i];
+                // Wingmen fliegen leicht nach hinten versetzt
+                let wingY = this.y + 15 + (Math.abs(offset) > 40 ? 15 : 0);
+                this.drawShip(this.x + offset, wingY, '#00ffaa', 0.6);
+            }
+        }
+
+        drawShip(x, y, color, scale) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.scale(scale, scale);
+            ctx.beginPath();
+            ctx.moveTo(0, -this.height / 2);
+            ctx.lineTo(this.width / 2, this.height / 2);
+            ctx.lineTo(0, this.height / 4);
+            ctx.lineTo(-this.width / 2, this.height / 2);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = color;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        update() {
+            // Bewegung Links/Rechts
+            if ((keys.ArrowLeft || keys.a) && this.x - this.width/2 > 0) {
+                this.x -= this.speed;
+            }
+            if ((keys.ArrowRight || keys.d) && this.x + this.width/2 < canvas.width) {
+                this.x += this.speed;
+            }
+
+            // Schießen
+            if (this.shootCooldown > 0) {
+                this.shootCooldown--;
+            } else {
+                this.shoot();
+                this.shootCooldown = 15; // Feuerrate
+            }
+        }
+
+        shoot() {
+            // Hauptschiff schießt
+            projectiles.push(new Projectile(this.x, this.y - this.height/2, -10, '#00ffff'));
+            
+            // Wingmen schießen
+            for (let i = 0; i < this.wingmenCount; i++) {
+                let offset = this.wingmenOffsets[i];
+                let wingY = this.y + 15 + (Math.abs(offset) > 40 ? 15 : 0);
+                projectiles.push(new Projectile(this.x + offset, wingY - 10, -10, '#00ffaa'));
+            }
+        }
+
+        hit() {
+            if (this.wingmenCount > 0) {
+                this.wingmenCount--; // Wingman opfern
+                createParticles(this.x, this.y, '#00ffaa');
+            } else {
+                isGameOver = true; // Keine Wingmen mehr -> Game Over
+                createParticles(this.x, this.y, '#00ffff');
+            }
+        }
+    }
+
+    class Projectile {
+        constructor(x, y, velocity, color) {
+            this.x = x;
+            this.y = y;
+            this.velocity = velocity;
+            this.color = color;
+            this.radius = 4;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = this.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        update() {
+            this.y += this.velocity;
+            if (this.y < 0 || this.y > canvas.height) this.markedForDeletion = true;
+        }
+    }
+
+    class Enemy {
+        constructor() {
+            this.width = 30;
+            this.height = 30;
+            this.x = Math.random() * (canvas.width - this.width) + this.width/2;
+            this.y = -50;
+            this.velocity = 2 + Math.random() * 2 + (score * 0.005); // Wird leicht schneller
+            this.markedForDeletion = false;
+            this.hp = 1;
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.beginPath();
+            ctx.moveTo(0, this.height/2);
+            ctx.lineTo(this.width/2, -this.height/2);
+            ctx.lineTo(-this.width/2, -this.height/2);
+            ctx.closePath();
+            ctx.fillStyle = '#ff3333';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff3333';
+            ctx.fill();
+            ctx.restore();
+        }
+        update() {
+            this.y += this.velocity;
+            if (this.y > canvas.height + 50) this.markedForDeletion = true;
+        }
+    }
+
+    class Perk {
+        constructor() {
+            this.radius = 15;
+            this.x = Math.random() * (canvas.width - this.radius*2) + this.radius;
+            this.y = -50;
+            this.velocity = 2;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            // Äußerer Kreis
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.strokeStyle = '#33ff33';
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#33ff33';
+            ctx.stroke();
+            
+            // Pluszeichen in der Mitte
+            ctx.beginPath();
+            ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
+            ctx.moveTo(0, -8); ctx.lineTo(0, 8);
+            ctx.stroke();
+            ctx.restore();
+        }
+        update() {
+            this.y += this.velocity;
+            if (this.y > canvas.height + 50) this.markedForDeletion = true;
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.velocity = { x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 8 };
+            this.color = color;
+            this.life = 1.0;
+            this.markedForDeletion = false;
+        }
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.life;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.restore();
+        }
+        update() {
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
+            this.life -= 0.05;
+            if (this.life <= 0) this.markedForDeletion = true;
+        }
+    }
+
+    // --- GLOBALE VARIABLEN ---
+    let player;
+    let projectiles = [];
+    let enemies = [];
+    let perks = [];
+
+    // --- HILFSFUNKTIONEN ---
+
+    function createParticles(x, y, color) {
+        for (let i = 0; i < 15; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    // Einfache Kollisionserkennung (Kreise / Distanz)
+    function checkCollision(obj1, obj2, threshold) {
+        const dx = obj1.x - obj2.x;
+        const dy = obj1.y - obj2.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < threshold;
+    }
+
+    function spawnEntities() {
+        // Gegner spawnen
+        if (frameCount % Math.max(30, 80 - Math.floor(score / 50)) === 0) {
+            enemies.push(new Enemy());
+        }
+        // Perks spawnen (Team-Zuwachs)
+        if (frameCount % 400 === 0 && Math.random() > 0.3) {
+            perks.push(new Perk());
+        }
+    }
+
+    // --- SPIELSCHLEIFE ---
+
+    function init() {
+        player = new Player();
+        projectiles = [];
+        enemies = [];
+        perks = [];
+        particles = [];
+        score = 0;
+        frameCount = 0;
+        isGameOver = false;
+        scoreText.innerText = score;
+        gameOverScreen.style.display = 'none';
+        animate();
+    }
+
+    function animate() {
+        if (isGameOver) {
+            finalScoreText.innerText = score;
+            gameOverScreen.style.display = 'block';
+            return;
+        }
+
+        // Hintergrund "Scroll-Effekt" durch Löschen und Neuzeichnen mit leichter Transparenz für Trails
+        ctx.fillStyle = 'rgba(0, 0, 15, 0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Sternen-Effekt
+        if(Math.random() > 0.5) {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(Math.random() * canvas.width, 0, 1, 2);
+        }
+
+        player.update();
+        player.draw();
+
+        spawnEntities();
+
+        // Arrays verwalten
+        [...projectiles, ...enemies, ...perks, ...particles].forEach(entity => {
+            entity.update();
+            entity.draw();
+        });
+
+        // Kollision: Projektil trifft Gegner
+        projectiles.forEach(p => {
+            enemies.forEach(e => {
+                if (!p.markedForDeletion && !e.markedForDeletion && checkCollision(p, e, 20)) {
+                    p.markedForDeletion = true;
+                    e.markedForDeletion = true;
+                    createParticles(e.x, e.y, '#ff3333');
+                    score += 10;
+                    scoreText.innerText = score;
+                }
+            });
+        });
+
+        // Kollision: Spieler trifft Gegner
+        enemies.forEach(e => {
+            // Prüfe Kollision mit Spieler ODER Wingmen
+            let hitTarget = false;
+            
+            // Check Hauptschiff
+            if (!e.markedForDeletion && checkCollision(player, e, 25)) {
+                hitTarget = true;
+            }
+            
+            // Check Wingmen
+            if (!hitTarget) {
+                for (let i = 0; i < player.wingmenCount; i++) {
+                    let offset = player.wingmenOffsets[i];
+                    let wingY = player.y + 15 + (Math.abs(offset) > 40 ? 15 : 0);
+                    let wingPos = { x: player.x + offset, y: wingY };
+                    if (!e.markedForDeletion && checkCollision(wingPos, e, 20)) {
+                        hitTarget = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hitTarget) {
+                e.markedForDeletion = true;
+                player.hit();
+            }
+        });
+
+        // Kollision: Spieler sammelt Perk
+        perks.forEach(p => {
+            if (!p.markedForDeletion && checkCollision(player, p, 30)) {
+                p.markedForDeletion = true;
+                if (player.wingmenCount < 4) {
+                    player.wingmenCount++;
+                    createParticles(p.x, p.y, '#33ff33');
+                } else {
+                    score += 50; // Bonus falls Team voll ist
+                    scoreText.innerText = score;
+                }
+            }
+        });
+
+        // Aufräumen markierter Objekte
+        projectiles = projectiles.filter(p => !p.markedForDeletion);
+        enemies = enemies.filter(e => !e.markedForDeletion);
+        perks = perks.filter(p => !p.markedForDeletion);
+        particles = particles.filter(p => !p.markedForDeletion);
+
+        frameCount++;
+        requestAnimationFrame(animate);
+    }
+
+    function resetGame() {
+        init();
+    }
+
+    // Spiel starten
+    init();
+
+</script>
+</body>
+</html>

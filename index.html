@@ -606,4 +606,37 @@
             });
 
             if (!hitSomething && checkCollision(player, e, 30)) {
-                e.m
+                e.markedForDeletion = true;
+                player.takeDamage(20);
+                createParticles(e.x, e.y, '#ff3333', 15);
+            }
+        });
+
+        // Kollision Spieler vs Perks
+        perks.forEach(p => {
+            if (!p.markedForDeletion && checkCollision(p, player, 35)) {
+                p.markedForDeletion = true;
+                if (p.typeInfo.id === 'weapon') player.weaponLevel = Math.min(4, player.weaponLevel + 1);
+                if (p.typeInfo.id === 'health') player.hp = Math.min(player.maxHp, player.hp + 30);
+                if (p.typeInfo.id === 'shield') player.shield = Math.min(player.maxShield, player.shield + 50);
+                if (p.typeInfo.id === 'wingman') player.addWingman();
+                score += 50;
+                scoreText.innerText = score;
+                createParticles(p.x, p.y, p.typeInfo.color, 20, 2);
+            }
+        });
+
+        // --- NEU: MEMORY LEAK CLEANUP ---
+        projectiles = projectiles.filter(p => !p.markedForDeletion);
+        enemies = enemies.filter(e => !e.markedForDeletion);
+        perks = perks.filter(p => !p.markedForDeletion);
+        particles = particles.filter(p => !p.markedForDeletion);
+
+        frameCount++;
+        requestAnimationFrame(animate);
+    }
+
+    init();
+</script>
+</body>
+</html>

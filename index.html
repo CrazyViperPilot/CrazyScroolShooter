@@ -393,10 +393,11 @@
             font-size: 12px;
             letter-spacing: 2px;
             color: #66ccff;
-            margin: 10px 2px 6px;
+            margin: 26px 2px 8px;
+            padding: 8px 2px 6px;
             border-bottom: 1px solid rgba(0,150,255,0.25);
-            padding-bottom: 3px;
         }
+        .shop-cat:first-child { margin-top: 6px; }
         .shop-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -2496,9 +2497,20 @@
         card.innerHTML = `<div class="si-top"><span class="si-ic">${icon}</span>${name}</div>
             <div class="si-desc">${desc}</div>${costHtml}`;
         if (state === 'affordable') {
-            const buy = (e) => { if (e) e.preventDefault(); onBuy(); };
-            card.addEventListener('click', buy);
-            card.addEventListener('touchstart', buy, { passive: false });
+            // Only buy on a real tap: if the finger moved (scrolling), cancel.
+            let sx = 0, sy = 0, moved = false;
+            card.addEventListener('touchstart', (e) => {
+                const t = e.touches[0];
+                sx = t.clientX; sy = t.clientY; moved = false;
+            }, { passive: true });
+            card.addEventListener('touchmove', (e) => {
+                const t = e.touches[0];
+                if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) moved = true;
+            }, { passive: true });
+            card.addEventListener('touchend', (e) => {
+                if (!moved) { e.preventDefault(); onBuy(); } // preventDefault blocks the synthetic click
+            }, { passive: false });
+            card.addEventListener('click', () => onBuy());
         }
         return card;
     }

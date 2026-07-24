@@ -25,6 +25,7 @@
             width: 100%;
             max-width: 500px;
             height: 100vh;
+            height: 100dvh; /* dynamic viewport: excludes mobile browser chrome */
             max-height: 850px;
         }
         canvas {
@@ -335,7 +336,7 @@
             display: none;
             flex-direction: column;
             z-index: 25;
-            padding: 10px 12px;
+            padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
             box-sizing: border-box;
             overflow: hidden;
         }
@@ -366,8 +367,27 @@
         }
         #shopScroll {
             flex: 1;
+            min-height: 0; /* allow the button below to stay visible in flex column */
             overflow-y: auto;
+            overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            padding-right: 6px;
+            scrollbar-width: thick;
+            scrollbar-color: #00aaff rgba(0, 40, 60, 0.4);
+        }
+        /* Wide, easy-to-grab scrollbar on touch devices */
+        #shopScroll::-webkit-scrollbar {
+            width: 14px;
+        }
+        #shopScroll::-webkit-scrollbar-track {
+            background: rgba(0, 40, 60, 0.4);
+            border-radius: 7px;
+        }
+        #shopScroll::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #00ccff, #0077aa);
+            border-radius: 7px;
+            border: 2px solid rgba(0, 20, 30, 0.6);
         }
         .shop-cat {
             font-size: 12px;
@@ -413,16 +433,19 @@
         .shop-item .si-cost.locked { color: #ff6688; }
         #startWaveBtn {
             flex-shrink: 0;
-            margin: 10px auto 0;
-            padding: 14px 30px;
-            background: transparent;
-            color: #ffcc33;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 10px 0 0;
+            padding: 16px 30px;
+            background: #ffcc33;
+            color: #000;
             border: 2px solid #ffcc33;
             border-radius: 10px;
-            font-size: 18px;
+            font-size: 19px;
             font-weight: bold;
             letter-spacing: 1px;
             cursor: pointer;
+            box-shadow: 0 0 16px rgba(255, 204, 51, 0.5);
         }
         #startWaveBtn:hover, #startWaveBtn:active { background: #ffcc33; color: #000; }
 
